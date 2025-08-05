@@ -259,7 +259,7 @@ function fetchImage(src, { timeout = 3e3, useProxy = "" } = {}) {
       return await fetchBlobAsDataURL(url);
     } catch (e) {
       if (useProxy && typeof useProxy === "string") {
-        const proxied = useProxy.replace(/\/$/, "") + safeEncodeURI(url);
+        const proxied = useProxy.replace(/\/$/, "") + "/" + safeEncodeURI(url);
         try {
           return await fetchBlobAsDataURL(proxied);
         } catch {
@@ -279,11 +279,13 @@ function fetchImage(src, { timeout = 3e3, useProxy = "" } = {}) {
     cache.image.set(src, src);
     return Promise.resolve(src);
   }
+  const cacheBustedSrc = src + (src.includes("?") ? "&" : "?") + `v=${Date.now()}`;
   const isSVG = /\.svg(\?.*)?$/i.test(src);
   if (isSVG) {
     return (async () => {
       try {
-        const response = await fetch(src, {
+        const response = await fetch(cacheBustedSrc, {
+          // [MODIFIED] Use cache-busted URL
           mode: "cors",
           credentials: crossOriginValue === "use-credentials" ? "include" : "omit"
         });
@@ -292,7 +294,7 @@ function fetchImage(src, { timeout = 3e3, useProxy = "" } = {}) {
         cache.image.set(src, encoded);
         return encoded;
       } catch {
-        return fetchWithFallback(src);
+        return fetchWithFallback(cacheBustedSrc);
       }
     })();
   }
@@ -316,7 +318,7 @@ function fetchImage(src, { timeout = 3e3, useProxy = "" } = {}) {
         resolve(dataURL);
       } catch {
         try {
-          const fallbackDataURL = await fetchWithFallback(src);
+          const fallbackDataURL = await fetchWithFallback(cacheBustedSrc);
           cache.image.set(src, fallbackDataURL);
           resolve(fallbackDataURL);
         } catch (e) {
@@ -328,14 +330,14 @@ function fetchImage(src, { timeout = 3e3, useProxy = "" } = {}) {
       clearTimeout(timeoutId);
       console.error(`[SnapDOM - fetchImage] Image failed to load: ${src}`);
       try {
-        const fallbackDataURL = await fetchWithFallback(src);
+        const fallbackDataURL = await fetchWithFallback(cacheBustedSrc);
         cache.image.set(src, fallbackDataURL);
         resolve(fallbackDataURL);
       } catch (e) {
         reject(e);
       }
     };
-    image.src = src;
+    image.src = cacheBustedSrc;
   });
 }
 function snapshotComputedStyle(style) {

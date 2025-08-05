@@ -127,15 +127,17 @@ export function isIconFont(familyOrUrl) {
   ];
   return iconFontPatterns.some(rx => rx.test(familyOrUrl));
 }
+
 /**
- *
+ * Fetches an image and converts it to a data URL, with caching and cache-busting.
  *
  * @export
- * @param {*} src
- * @param {number} [timeout=3000]
- * @return {*} 
+ * @param {string} src - The source URL of the image.
+ * @param {object} [options={}] - Fetching options.
+ * @param {number} [options.timeout=3000] - Timeout in milliseconds.
+ * @param {string} [options.useProxy=''] - A proxy URL to use for CORS fallbacks.
+ * @returns {Promise<string>} A promise that resolves with the data URL.
  */
-
 export function fetchImage(src, { timeout = 3000, useProxy = '' } = {}) {
   function getCrossOriginMode(url) {
     try {
@@ -146,41 +148,39 @@ export function fetchImage(src, { timeout = 3000, useProxy = '' } = {}) {
     }
   }
 
-  // Función común para fallback vía fetch + proxy
+  // Common function for fallback via fetch + proxy
   async function fetchWithFallback(url) {
     const fetchBlobAsDataURL = (fetchUrl) =>
       fetch(fetchUrl, {
         mode: "cors",
         credentials: getCrossOriginMode(fetchUrl) === "use-credentials" ? "include" : "omit",
       })
-        .then(r => r.blob())
-        .then(blob => new Promise((resolve, reject) => {
-          const reader = new FileReader();
-          reader.onloadend = () => {
-            const base64 = reader.result;
-            if (typeof base64 !== "string" || !base64.startsWith("data:image/")) {
-              reject(new Error("Invalid image data URL"));
-              return;
-            }
-            resolve(base64);
-          };
-          reader.onerror = () => reject(new Error("FileReader error"));
-          reader.readAsDataURL(blob);
-        }));
+      .then(r => r.blob())
+      .then(blob => new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onloadend = () => {
+          const base64 = reader.result;
+          if (typeof base64 !== "string" || !base64.startsWith("data:image/")) {
+            reject(new Error("Invalid image data URL"));
+            return;
+          }
+          resolve(base64);
+        };
+        reader.onerror = () => reject(new Error("FileReader error"));
+        reader.readAsDataURL(blob);
+      }));
 
     try {
       return await fetchBlobAsDataURL(url);
     } catch (e) {
       if (useProxy && typeof useProxy === "string") {
-        const proxied = useProxy.replace(/\/$/, "") + safeEncodeURI(url);
+        const proxied = useProxy.replace(/\/$/, "") + '/' + safeEncodeURI(url);
         try {
           return await fetchBlobAsDataURL(proxied);
         } catch {
-          
           throw new Error("[SnapDOM - fetchImage] CORS restrictions prevented image capture (even via proxy)");
         }
       } else {
-       
         throw new Error("[SnapDOM - fetchImage] Fetch fallback failed and no proxy provided");
       }
     }
@@ -188,33 +188,37 @@ export function fetchImage(src, { timeout = 3000, useProxy = '' } = {}) {
 
   const crossOriginValue = getCrossOriginMode(src);
 
+  // First, check the cache with the original src URL
   if (cache.image.has(src)) {
     return Promise.resolve(cache.image.get(src));
   }
 
-  // Detectamos si es un data URI, si sí, devolvemos directo sin fetch
+  // If it's a data URI, return it directly
   const isDataURI = src.startsWith("data:image/");
   if (isDataURI) {
     cache.image.set(src, src);
     return Promise.resolve(src);
   }
 
-  // Mejor detección SVG, incluyendo query strings
+  // [MODIFIED] Create a cache-busted URL for all network requests
+  const cacheBustedSrc = src + (src.includes('?') ? '&' : '?') + `v=${Date.now()}`;
+
+  // Improved SVG detection, including query strings
   const isSVG = /\.svg(\?.*)?$/i.test(src);
 
   if (isSVG) {
     return (async () => {
       try {
-        const response = await fetch(src, {
+        const response = await fetch(cacheBustedSrc, { // [MODIFIED] Use cache-busted URL
           mode: "cors",
           credentials: crossOriginValue === "use-credentials" ? "include" : "omit"
         });
         const svgText = await response.text();
         const encoded = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svgText)}`;
-        cache.image.set(src, encoded);
+        cache.image.set(src, encoded); // Use original src as cache key
         return encoded;
       } catch {
-        return fetchWithFallback(src);
+        return fetchWithFallback(cacheBustedSrc); // [MODIFIED] Use cache-busted URL
       }
     })();
   }
@@ -237,12 +241,12 @@ export function fetchImage(src, { timeout = 3000, useProxy = '' } = {}) {
         const ctx = canvas.getContext("2d");
         ctx.drawImage(image, 0, 0, canvas.width, canvas.height);
         const dataURL = canvas.toDataURL("image/png");
-        cache.image.set(src, dataURL);
+        cache.image.set(src, dataURL); // Use original src as cache key
         resolve(dataURL);
       } catch {
         try {
-          const fallbackDataURL = await fetchWithFallback(src);
-          cache.image.set(src, fallbackDataURL);
+          const fallbackDataURL = await fetchWithFallback(cacheBustedSrc); // [MODIFIED] Use cache-busted URL
+          cache.image.set(src, fallbackDataURL); // Use original src as cache key
           resolve(fallbackDataURL);
         } catch (e) {
           reject(e);
@@ -254,15 +258,15 @@ export function fetchImage(src, { timeout = 3000, useProxy = '' } = {}) {
       clearTimeout(timeoutId);
       console.error(`[SnapDOM - fetchImage] Image failed to load: ${src}`);
       try {
-        const fallbackDataURL = await fetchWithFallback(src);
-        cache.image.set(src, fallbackDataURL);
+        const fallbackDataURL = await fetchWithFallback(cacheBustedSrc); // [MODIFIED] Use cache-busted URL
+        cache.image.set(src, fallbackDataURL); // Use original src as cache key
         resolve(fallbackDataURL);
       } catch (e) {
         reject(e);
       }
     };
 
-    image.src = src;
+    image.src = cacheBustedSrc; // [MODIFIED] Use cache-busted URL
   });
 }
 
@@ -334,4 +338,3 @@ export function splitBackgroundImage(bg) {
   parts.push(bg.slice(lastIndex).trim());
   return parts;
 }
-

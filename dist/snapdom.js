@@ -311,7 +311,7 @@
           return yield fetchBlobAsDataURL(url);
         } catch (e) {
           if (useProxy && typeof useProxy === "string") {
-            const proxied = useProxy.replace(/\/$/, "") + safeEncodeURI(url);
+            const proxied = useProxy.replace(/\/$/, "") + "/" + safeEncodeURI(url);
             try {
               return yield fetchBlobAsDataURL(proxied);
             } catch (e2) {
@@ -332,11 +332,13 @@
       cache.image.set(src, src);
       return Promise.resolve(src);
     }
+    const cacheBustedSrc = src + (src.includes("?") ? "&" : "?") + `v=${Date.now()}`;
     const isSVG = /\.svg(\?.*)?$/i.test(src);
     if (isSVG) {
       return (() => __async(null, null, function* () {
         try {
-          const response = yield fetch(src, {
+          const response = yield fetch(cacheBustedSrc, {
+            // [MODIFIED] Use cache-busted URL
             mode: "cors",
             credentials: crossOriginValue === "use-credentials" ? "include" : "omit"
           });
@@ -345,7 +347,7 @@
           cache.image.set(src, encoded);
           return encoded;
         } catch (e) {
-          return fetchWithFallback(src);
+          return fetchWithFallback(cacheBustedSrc);
         }
       }))();
     }
@@ -369,7 +371,7 @@
           resolve(dataURL);
         } catch (e) {
           try {
-            const fallbackDataURL = yield fetchWithFallback(src);
+            const fallbackDataURL = yield fetchWithFallback(cacheBustedSrc);
             cache.image.set(src, fallbackDataURL);
             resolve(fallbackDataURL);
           } catch (e2) {
@@ -381,14 +383,14 @@
         clearTimeout(timeoutId);
         console.error(`[SnapDOM - fetchImage] Image failed to load: ${src}`);
         try {
-          const fallbackDataURL = yield fetchWithFallback(src);
+          const fallbackDataURL = yield fetchWithFallback(cacheBustedSrc);
           cache.image.set(src, fallbackDataURL);
           resolve(fallbackDataURL);
         } catch (e) {
           reject(e);
         }
       });
-      image.src = src;
+      image.src = cacheBustedSrc;
     });
   }
   function snapshotComputedStyle(style) {
