@@ -138,7 +138,12 @@ export async function snapFetch(url, options = {}) {
   const inflight = _inflight.get(key);
   if (inflight) return inflight;
   // Final URL & credentials
-  const finalURL = shouldProxy(url, useProxy) ? applyProxy(url, useProxy) : url;
+  let finalURL = shouldProxy(url, useProxy) ? applyProxy(url, useProxy) : url;
+  // Apply cache buster
+  const separator = finalURL.includes('?') ? '&' : '?';
+  finalURL += `${separator}t=${Date.now()}`;
+  
+
   let cred = options.credentials;
   if (!cred) {
     try {
